@@ -1,0 +1,121 @@
+#!/usr/bin/make -f
+# -*- makefile -*-
+
+export DH_VERBOSE=1
+
+export DEBIAN_DISABLE_RUBYGEMS_INTEGRATION = 1
+
+# This has to be exported to make some magic below work.
+export DH_OPTIONS
+TESTOPTS += -v
+export TESTOPTS
+
+DEB_BUILD_GNU_TYPE ?= $(shell dpkg-architecture -qDEB_BUILD_GNU_TYPE)
+DEB_HOST_ARCH ?= $(shell dpkg-architecture -qDEB_HOST_ARCH)
+DEB_HOST_GNU_TYPE ?= $(shell dpkg-architecture -qDEB_HOST_GNU_TYPE)
+DEB_HOST_MULTIARCH ?= $(shell dpkg-architecture -qDEB_HOST_MULTIARCH)
+
+include /usr/share/dpkg/pkg-info.mk
+
+export RUBY_VERSION       := $(patsubst ruby%,%,$(DEB_SOURCE))
+export RUBY_API_VERSION   := $(RUBY_VERSION).0
+
+configure_options += --prefix=/usr
+configure_options += --enable-multiarch
+configure_options += --target=$(DEB_HOST_MULTIARCH)
+configure_options += --program-suffix=$(RUBY_VERSION)
+configure_options += --with-soname=ruby-$(RUBY_VERSION)
+configure_options += --enable-shared
+configure_options += --disable-rpath
+configure_options += --with-sitedir='/usr/local/lib/site_ruby'
+configure_options += --with-sitearchdir="/usr/local/lib/$(DEB_HOST_MULTIARCH)/site_ruby"
+configure_options += --runstatedir=/var/run
+configure_options += --localstatedir=/var
+configure_options += --sysconfdir=/etc
+
+ifneq ($(DEB_BUILD_GNU_TYPE), $(DEB_HOST_GNU_TYPE))
+# Cross-building. This is the same logic that debhelper's
+# lib/Debian/Debhelper/Buildsystem/autoconf.pm uses.
+# note that you also need --with-baseruby, so use the "cross" build-profile.
+configure_options += --build=$(DEB_BUILD_GNU_TYPE)
+configure_options += --host=$(DEB_HOST_GNU_TYPE)
+endif
+ifneq ($(filter cross,$(DEB_BUILD_PROFILES)),)
+configure_options += --with-baseruby=/usr/bin/ruby
+endif
+
+# the following are ignored by ./configure, but used by some extconf.rb scripts
+configure_options += --enable-ipv6
+configure_options += --with-dbm-type=gdbm_compat
+
+# hardening and other standard Debian build flags
+export DEB_BUILD_MAINT_OPTIONS = hardening=+bindnow
+configure_options += $(shell dpkg-buildflags --export=configure)
+
+# Always build with /bin/bash, to get consistent rbconfig.rb (which embeds SHELL).
+export SHELL := /bin/bash
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+	cp /usr/share/misc/config.guess tool
+	cp /usr/share/misc/config.sub tool
+	./configure $(configure_options)
+
+override_dh_auto_clean:
+	dh_auto_clean
+	rm -f tool/config.guess tool/config.sub
+	$(RM) test/excludes/$(DEB_HOST_ARCH)
+	$(RM) -r .ext
+	$(RM) -r doc/capi
+
+override_dh_auto_build-arch:
+	dh_auto_build -- main V=1
+
+excludes =
+excludes += --excludes-dir=debian/tests/excludes/any/
+excludes += --excludes-dir=debian/tests/excludes/$(DEB_HOST_ARCH)/
+override_dh_auto_test-arch:
+ifeq (,$(filter nocheck,$(DEB_BUILD_OPTIONS)))
+	$(MAKE) check V=1 RUBY_TESTOPTS=-v TESTS="$(excludes)" OPENSSL_CONF=/dev/null
+endif
+
+override_dh_auto_install-arch:
+	$(MAKE) install-nodoc V=1 DESTDIR=$(CURDIR)/debian/tmp
+	# handle embedded copy of jquery
+	$(RM) $(CURDIR)/debian/tmp/usr/lib/ruby/$(RUBY_API_VERSION)/rdoc/generator/template/darkfish/js/jquery.js
+	dh_link -plibruby$(RUBY_VERSION) /usr/share/javascript/jquery/jquery.min.js /usr/lib/ruby/$(RUBY_API_VERSION)/rdoc/generator/template/darkfish/js/jquery.js
+	# handle embedded copy of Lato (font)
+	$(RM) $(CURDIR)/debian/tmp/usr/lib/ruby/$(RUBY_API_VERSION)/rdoc/generator/template/darkfish/fonts/Lato-Regular.ttf
+	dh_link -plibruby$(RUBY_VERSION) /usr/share/fonts/truetype/lato/Lato-Regular.ttf /usr/lib/ruby/$(RUBY_API_VERSION)/rdoc/generator/template/darkfish/fonts/Lato-Regular.ttf
+	$(RM) $(CURDIR)/debian/tmp/usr/lib/ruby/$(RUBY_API_VERSION)/rdoc/generator/template/darkfish/fonts/Lato-RegularItalic.ttf
+	dh_link -plibruby$(RUBY_VERSION) /usr/share/fonts/truetype/lato/Lato-Italic.ttf /usr/lib/ruby/$(RUBY_API_VERSION)/rdoc/generator/template/darkfish/fonts/Lato-RegularItalic.ttf
+	$(RM) $(CURDIR)/debian/tmp/usr/lib/ruby/$(RUBY_API_VERSION)/rdoc/generator/template/darkfish/fonts/Lato-Light.ttf
+	dh_link -plibruby$(RUBY_VERSION) /usr/share/fonts/truetype/lato/Lato-Light.ttf /usr/lib/ruby/$(RUBY_API_VERSION)/rdoc/generator/template/darkfish/fonts/Lato-Light.ttf
+	$(RM) $(CURDIR)/debian/tmp/usr/lib/ruby/$(RUBY_API_VERSION)/rdoc/generator/template/darkfish/fonts/Lato-LightItalic.ttf
+	dh_link -plibruby$(RUBY_VERSION) /usr/share/fonts/truetype/lato/Lato-LightItalic.ttf /usr/lib/ruby/$(RUBY_API_VERSION)/rdoc/generator/template/darkfish/fonts/Lato-LightItalic.ttf
+	# remove embedded SSL certificates (replaced using ca-certificates via rubygems-integration)
+	$(RM) -r $(CURDIR)/debian/tmp/usr/lib/ruby/$(RUBY_API_VERSION)/rubygems/ssl_certs/*
+	$(RM) -r $(CURDIR)/debian/tmp/usr/lib/ruby/$(RUBY_API_VERSION)/bundler/ssl_certs/*
+	# ship rubygems system install directory
+	mkdir -p $(CURDIR)/debian/tmp/var/lib/gems/$(RUBY_API_VERSION)
+	# fix pkg-config
+	# FIXME there is probably less brutal way of doing this
+	sed -i -e 's/^DLDFLAGS=.*/DLDFLAGS=/' \
+		$(CURDIR)/debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/pkgconfig/ruby-$(RUBY_VERSION).pc
+	# sanity check
+	debian/sanity_check
+
+override_dh_auto_build-indep:
+	$(MAKE) docs V=1
+
+override_dh_auto_install-indep:
+	$(MAKE) install-doc V=1 DESTDIR=$(CURDIR)/debian/ruby$(RUBY_VERSION)-doc
+	find $(CURDIR)/debian/ruby$(RUBY_VERSION)-doc -name created.rid -delete
+
+override_dh_install-arch:
+	# install SystemTap tapfile
+	mkdir -p $(CURDIR)/debian/tmp/usr/share/systemtap/tapset
+	sed 's|@LIBRARY_PATH@|/usr/lib/$(DEB_HOST_MULTIARCH)/libruby-$(RUBY_VERSION).so|g' $(CURDIR)/debian/libruby.stp > $(CURDIR)/debian/tmp/usr/share/systemtap/tapset/libruby$(RUBY_VERSION)-$(DEB_HOST_MULTIARCH).stp
+	dh_install

@@ -1,0 +1,12 @@
+Package: ruby2.5-dbgsym
+Source: ruby2.5
+Version: 2.5.3-3
+Auto-Built-Package: debug-symbols
+Architecture: amd64
+Maintainer: Debian Ruby Team <pkg-ruby-extras-maintainers@lists.alioth.debian.org>
+Installed-Size: 19
+Depends: ruby2.5 (= 2.5.3-3)
+Section: debug
+Priority: optional
+Description: debug symbols for ruby2.5
+Build-Ids: 114aab0e647bf2d4215685a3d860895ac298a9ad

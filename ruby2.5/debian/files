@@ -1,0 +1,6 @@
+libruby2.5-dbgsym_2.5.3-3_amd64.deb debug optional automatic=yes
+libruby2.5_2.5.3-3_amd64.deb libs optional
+ruby2.5-dbgsym_2.5.3-3_amd64.deb debug optional automatic=yes
+ruby2.5-dev_2.5.3-3_amd64.deb ruby optional
+ruby2.5-doc_2.5.3-3_all.deb doc optional
+ruby2.5_2.5.3-3_amd64.deb ruby optional
